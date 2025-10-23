@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         [BETA] BAC with H/T/D/T
 // @namespace    http://tampermonkey.net/
-// @version      2.1.9
+// @version      2.1.8
 // @description  Enhances airline-club.com and v2.airline-club.com airline management game (protip: Sign into your 2 accounts with one on each domain to avoid extra logout/login). Install this script with automatic updates by first installing TamperMonkey/ViolentMonkey/GreaseMonkey and installing it as a userscript.
 // @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
@@ -360,6 +360,12 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
             <div class="value" id="linkAverageProfit"></div>
         </div>`)
     }
+    
+    const averageCapacity = {
+            economy: averageFromSubKey(linkHistory, 'capacity', 'economy'),
+            business: averageFromSubKey(linkHistory, 'capacity', 'business'),
+            first: averageFromSubKey(linkHistory, 'capacity', 'first'),
+        }
 
     const averageLoadFactor = getLoadFactorsFor({
         soldSeats: {
@@ -367,22 +373,19 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
             business: averageFromSubKey(linkHistory, 'soldSeats', 'business'),
             first: averageFromSubKey(linkHistory, 'soldSeats', 'first'),
         },
-        capacity: {
-            economy: averageFromSubKey(linkHistory, 'capacity', 'economy'),
-            business: averageFromSubKey(linkHistory, 'capacity', 'business'),
-            first: averageFromSubKey(linkHistory, 'capacity', 'first'),
-        }
+        capacity: averageCapacity
     });
 
     var latestLinkData = linkHistory[0]
 
     // SQ Cost calculation and display
+
     let sqCost = 0;
     let averageSqCost = 0
     if (fundingProjection && activeAirline && activeAirline.serviceQuality > 0) {
         const tempLinkForSq = { capacity: latestLinkData.capacity, distance: link.distance };
         sqCost = calculateSqCost(tempLinkForSq, fundingProjection, activeAirline.serviceQuality);
-        const averageTempLinkForSq = { capacity: averageFromSubKey(linkHistory, 'capacity', 'total'), distance: link.distance };
+        const averageTempLinkForSq = { capacity: averageCapacity, distance: link.distance };
         averageSqCost = calculateSqCost(averageTempLinkForSq, fundingProjection, activeAirline.serviceQuality);
     }
 
