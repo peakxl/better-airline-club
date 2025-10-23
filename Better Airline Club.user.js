@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         [BETA] BAC with H/T/D/T
 // @namespace    http://tampermonkey.net/
-// @version      2.1.8
+// @version      2.1.9
 // @description  Enhances airline-club.com and v2.airline-club.com airline management game (protip: Sign into your 2 accounts with one on each domain to avoid extra logout/login). Install this script with automatic updates by first installing TamperMonkey/ViolentMonkey/GreaseMonkey and installing it as a userscript.
 // @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
@@ -378,14 +378,17 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     // SQ Cost calculation and display
     let sqCost = 0;
+    let averageSqCost = 0
     if (fundingProjection && activeAirline && activeAirline.serviceQuality > 0) {
         const tempLinkForSq = { capacity: latestLinkData.capacity, distance: link.distance };
         sqCost = calculateSqCost(tempLinkForSq, fundingProjection, activeAirline.serviceQuality);
+        const averageTempLinkForSq = { capacity: averageFromSubKey(linkHistory, 'capacity', 'total'), distance: link.distance };
+        averageSqCost = calculateSqCost(averageTempLinkForSq, fundingProjection, activeAirline.serviceQuality);
     }
 
     if (!$("#linkSqCost").length) {
         $("#linkServiceSupplies").parent().after(`<div class="table-row">
-            <div class="label"><h5>SQ cost:</h5></div>
+            <div class="label"><h5>SQ Cost:</h5></div>
             <div class="value" id="linkSqCost"></div>
         </div>`);
     }
@@ -393,7 +396,6 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     // Adjust profit
     latestLinkData.profit -= sqCost;
-    // Note: Average profit over time is not adjusted as SQ settings could have changed.
 
     $("#linkHistoryPrice").text(toLinkClassValueString(latestLinkData.price, "$"))
     $("#linkHistoryCapacity").text(toLinkClassValueString(latestLinkData.capacity))
@@ -415,7 +417,7 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     const dollarValuesByElementId = {
         linkProfit: latestLinkData.profit,
-        linkAverageProfit: Math.round(averageFromSubKey(linkHistory, 'profit')),
+        linkAverageProfit: Math.round(averageFromSubKey(linkHistory, 'profit') - averageSqCost),
         linkRevenue: latestLinkData.revenue,
         linkFuelCost: latestLinkData.fuelCost,
         linkCrewCost: latestLinkData.crewCost,
