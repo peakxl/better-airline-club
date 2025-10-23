@@ -3,7 +3,7 @@
 // @namespace    http://tampermonkey.net/
 // @version      2.1.8
 // @description  Enhances airline-club.com and v2.airline-club.com airline management game (protip: Sign into your 2 accounts with one on each domain to avoid extra logout/login). Install this script with automatic updates by first installing TamperMonkey/ViolentMonkey/GreaseMonkey and installing it as a userscript.
-// @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (Service funding cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
+// @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
 // @icon         https://www.airline-club.com/favicon.ico
 // @downloadURL  https://github.com/Bohaska/bac/raw/main/Better%20Airline%20Club.user.js
@@ -192,7 +192,7 @@ function getTierFromPercent(val, min = 0, max = 100) {
 var cachedFundingProjection = null;
 
 /**
- * Fetches the airline's total service funding projection.
+ * Fetches the airline's total SQ cost projection.
  * Caches the result to avoid repeated API calls.
  * @param {number} airlineId The ID of the active airline.
  * @returns {Promise<number>} The funding projection amount.
@@ -203,7 +203,7 @@ async function getFundingProjection(airlineId) {
             const result = await _request(`airlines/${airlineId}/service-funding-projection`);
             cachedFundingProjection = result.fundingProjection;
         } catch (e) {
-            console.error("Failed to fetch service funding projection. SQ Cost will be 0.", e);
+            console.error("Failed to get airline SQ quality. SQ Cost will be 0.", e);
             cachedFundingProjection = 0; // Set to 0 on failure to prevent re-fetching
         }
     }
@@ -385,7 +385,7 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
 
     if (!$("#linkSqCost").length) {
         $("#linkServiceSupplies").parent().after(`<div class="table-row">
-            <div class="label"><h5>Service Funding:</h5></div>
+            <div class="label"><h5>SQ cost:</h5></div>
             <div class="value" id="linkSqCost"></div>
         </div>`);
     }
