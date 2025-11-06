@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         [BETA] BAC with H/T/D/T
 // @namespace    http://tampermonkey.net/
-// @version      2.1.9
+// @version      2.2.0
 // @description  Enhances airline-club.com and v2.airline-club.com airline management game (protip: Sign into your 2 accounts with one on each domain to avoid extra logout/login). Install this script with automatic updates by first installing TamperMonkey/ViolentMonkey/GreaseMonkey and installing it as a userscript.
 // @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
@@ -360,7 +360,7 @@ async function loadHistoryForLink(airlineId, linkId, cycleCount, link) {
             <div class="value" id="linkAverageProfit"></div>
         </div>`)
     }
-    
+
     const averageCapacity = {
             economy: averageFromSubKey(linkHistory, 'capacity', 'economy'),
             business: averageFromSubKey(linkHistory, 'capacity', 'business'),
@@ -724,39 +724,6 @@ unsafeWindow.cancelPlanLink = function cancelPlanLink() {
     }
 }
 
-
-async function _updateLatestOilPriceInHeader() {
-    const oilPrices = await _request('oil-prices');
-    const latestPrice = oilPrices.slice(-1)[0].price;
-
-    if (!$('.topBarDetails .latestOilPriceShortCut').length) {
-        $('.topBarDetails .delegatesShortcut').after(`
-            <span style="margin: 0px 10px; padding: 0 5px"  title="Latest Oil Price" class="latestOilPriceShortCut clickable" onclick="showOilCanvas()">
-                <span class="latest-price label" style=""></span>
-            </span>
-        `);
-    }
-
-    const tierForPrice = 5 - getTierFromPercent(latestPrice, 40, 80);
-
-    if (tierForPrice < 2) {
-        $('.latestOilPriceShortCut')
-            .addClass('glow')
-            .addClass('button');
-    } else {
-        $('.latestOilPriceShortCut')
-            .removeClass('glow')
-            .removeClass('button');
-    }
-
-    $('.topBarDetails .latest-price')
-        .text('$'+commaSeparateNumber(latestPrice))
-        .attr({style: getStyleFromTier(tierForPrice)});
-
-    setTimeout(() => {
-        _updateLatestOilPriceInHeader();
-    }, Math.round(Math.max(typeof durationTillNextTick !== 'undefined' ? durationTillNextTick / 2 : 60000, 60000)));
-}
 
 function commaSeparateNumberForLinks(val) {
     const over1k = val > 1000 || val < -1000;
@@ -1729,7 +1696,6 @@ function launch(){
     $("#airplaneModelDetails > div").before(`<select class="select-css" id="viewLinkModelSelect" onchange="linkUpdateModelInfo($(this).val())" style="margin: 10px auto; float: middle; display: none;"></select>`);
 
     _updateChartOptionsIfNeeded();
-    _updateLatestOilPriceInHeader();
 };
 
 $(document).ready(() => setTimeout(() => launch(), 1000));
