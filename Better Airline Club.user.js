@@ -6,8 +6,8 @@
 // @author       Maintained by Fly or die (BAC by Aphix/Torus @ https://gist.github.com/aphix/fdeeefbc4bef1ec580d72639bbc05f2d) (original "Cost Per PAX" portion by Alrianne @ https://github.com/wolfnether/Airline_Club_Mod/) (SQ cost by Toast @ https://pastebin.com/9QrdnNKr) (Default price % and fuel calculation from bleu0/Pineapple Air) (With help from Gemini 2.0 and 2.5)
 // @match        https://*.airline-club.com/*
 // @icon         https://www.airline-club.com/favicon.ico
-// @downloadURL  https://github.com/Bohaska/bac/raw/main/Better%20Airline%20Club.user.js
-// @updateURL    https://github.com/Bohaska/bac/raw/main/Better%20Airline%20Club.user.js
+// @downloadURL  https://raw.githubusercontent.com/peakxl/better-airline-club/main/Better%20Airline%20Club.user.js
+// @updateURL    https://raw.githubusercontent.com/peakxl/better-airline-club/main/Better%20Airline%20Club.user.js
 // @grant        GM_info
 // @grant        unsafeWindow
 // ==/UserScript==
