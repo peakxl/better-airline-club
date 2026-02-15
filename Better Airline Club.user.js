@@ -22,6 +22,7 @@ var DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER = 0; // Changes default minimum num
 var DEFAULT_MIN_FLIGHT_RANGE_FILTER = 0;
 var DEFAULT_RUNWAY_LENGTH_FILTER = 3600;
 var DEFAULT_MIN_CAPACITY_FILTER = 0;
+var DEFAULT_FUEL_PRICE = 60;
 
 var MAIN_PANEL_WIDTH = '62%'; // Percent of screen for all the main (left-side) tables with lists (flight/airplane/etc)
 var SIDE_PANEL_WIDTH = '38%'; // Percent of screen for all the right-side details (usually linked with whatever is selected in the main/left panel, e.g. flight details)
@@ -1754,6 +1755,28 @@ function computeFuelCost(fuelBurn, distance, frequency) {
     return Math.floor(totalFuelCost);
 }
 
+function getFuelPriceInputValue() {
+    let fuelPriceInput = document.getElementById("fuel_price");
+    if (!fuelPriceInput) {
+        return DEFAULT_FUEL_PRICE;
+    }
+
+    let fuelPrice = parseFloat(fuelPriceInput.value);
+    return Number.isFinite(fuelPrice) ? fuelPrice : DEFAULT_FUEL_PRICE;
+}
+
+function getCostPlusFuelPerPax(costPerPax, fuelBurn, capacity, fuelPrice) {
+    if (!capacity || capacity <= 0 || !Number.isFinite(costPerPax)) {
+        return costPerPax;
+    }
+
+    return costPerPax + (fuelBurn / capacity) * fuelPrice;
+}
+
+function formatFuelPriceLabel(fuelPrice) {
+    return Number.isInteger(fuelPrice) ? fuelPrice.toString() : fuelPrice.toFixed(2);
+}
+
 function _getPlaneCategoryFor(plane) {
     switch (plane.airplaneType.toUpperCase()) {
         case 'LIGHT':
@@ -1785,7 +1808,8 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
     let min_circulation = parseInt($("#min_circulation").val(), 10);
 
     let owned_only = document.getElementById("owned_only").checked;
-    let use_flight_total =document.getElementById("use_flight_total").checked;
+    let use_flight_total = document.getElementById("use_flight_total").checked;
+    let fuelPrice = getFuelPriceInputValue();
 
     for (let plane of loadedModelsOwnerInfo) {
         plane.isOwned = ((plane.assignedAirplanes.length + plane.availableAirplanes.length + plane.constructingAirplanes.length) !== 0);
@@ -1822,6 +1846,7 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         plane.fbpf = computeFuelCost(plane.fuelBurn, distance, 1);
         plane.fuel_total = ((plane.fbpf + airport_fee + inflight_cost + crew_cost) * plane.max_rotation + depreciationRate + maintenance);
         plane.cpp = plane.fuel_total / (plane.capacity * plane.max_rotation);
+        plane.cpp_plus_fuel = getCostPlusFuelPerPax(plane.cpp, plane.fuelBurn, plane.capacity, fuelPrice);
         plane.max_capacity = plane.capacity * plane.max_rotation;
 
         plane.discountPercent = (plane.originalPrice) ? Math.round(100 - (plane.price / plane.originalPrice * 100)) : 0;
@@ -1851,22 +1876,27 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
     if (!sortProperty && !sortOrder) {
         var selectedSortHeader = $('#airplaneModelSortHeader .cell.selected')
         sortProperty = selectedSortHeader.data('sort-property')
-        if (sortProperty === 'capacity') {
-            sortProperty = 'max_capacity';
-        } else if (sortProperty === 'cpp' && use_flight_total) {
-            sortProperty = 'fuel_total';
-        }
         sortOrder = selectedSortHeader.data('sort-order')
     }
+
+    if (sortProperty === 'capacity') {
+        sortProperty = 'max_capacity';
+    } else if (sortProperty === 'cpp' && use_flight_total) {
+        sortProperty = 'cpp_plus_fuel';
+    }
+
     //sort the list
     loadedModelsOwnerInfo.sort(sortByProperty(sortProperty, sortOrder == "ascending"));
 
     var airplaneModelTable = $("#airplaneModelTable")
     airplaneModelTable.children("div.table-row").remove()
 
-    var cppValues = loadedModelsOwnerInfo.filter(l => l.shouldShow).map(l => l.cpp);
-    var cppMax = Math.max(...cppValues);
-    var cppMin = Math.max(Math.min(...cppValues), 0);
+    var cppValues = loadedModelsOwnerInfo
+        .filter(l => l.shouldShow)
+        .map(l => use_flight_total ? l.cpp_plus_fuel : l.cpp)
+        .filter(v => Number.isFinite(v));
+    var cppMax = cppValues.length ? Math.max(...cppValues) : 0;
+    var cppMin = cppValues.length ? Math.max(Math.min(...cppValues), 0) : 0;
 
     $.each(loadedModelsOwnerInfo, function(index, modelOwnerInfo) {
         if (!modelOwnerInfo.shouldShow) {
@@ -1889,7 +1919,12 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.runwayRequirement + " m</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.assignedAirplanes.length + "/" + modelOwnerInfo.availableAirplanes.length + "/" + modelOwnerInfo.constructingAirplanes.length + "</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.max_rotation + "</div>")
-        row.append("<div class='cell' align='right' style='"+ getStyleFromTier(getTierFromPercent(-1*modelOwnerInfo.cpp, -1*cppMax, -1*cppMin)) +"' title='"+commaSeparateNumber(Math.round(modelOwnerInfo.fuel_total))+"/total ("+commaSeparateNumber(Math.round(modelOwnerInfo.cpp * modelOwnerInfo.capacity))+"/flight)'>" + commaSeparateNumber(Math.round(modelOwnerInfo.cpp)) + "</div>")
+        let displayedCpp = use_flight_total ? modelOwnerInfo.cpp_plus_fuel : modelOwnerInfo.cpp;
+        let fuelCostPerPax = (modelOwnerInfo.capacity > 0) ? ((modelOwnerInfo.fuelBurn / modelOwnerInfo.capacity) * fuelPrice) : 0;
+        let cppTooltip = use_flight_total
+            ? (`${commaSeparateNumber(Math.round(modelOwnerInfo.cpp))} + ${commaSeparateNumber(Math.round(fuelCostPerPax))} fuel (@$${formatFuelPriceLabel(fuelPrice)})`)
+            : (`${commaSeparateNumber(Math.round(modelOwnerInfo.fuel_total))}/total (${commaSeparateNumber(Math.round(modelOwnerInfo.cpp * modelOwnerInfo.capacity))}/flight)`);
+        row.append("<div class='cell' align='right' style='"+ getStyleFromTier(getTierFromPercent(-1*displayedCpp, -1*cppMax, -1*cppMin)) +"' title='"+ cppTooltip +"'>" + commaSeparateNumber(Math.round(displayedCpp)) + "</div>")
 
         let discountTier;
         if (modelOwnerInfo.discountPercent > 40) {
@@ -1967,6 +2002,7 @@ $("#airplaneCanvas .mainPanel .section .table .table-header:first").append(`
     <div class="cell detailsSelection">Runway length: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
     <div class="cell detailsSelection">Min. Capacity: <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
     <div class="cell detailsSelection">Min. Circulation: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
+    <div class="cell detailsSelection">Fuel price: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
     <div class="cell detailsSelection" style="min-width: 160px; text-align:right">
         <label for="owned_only">Owned Only <input type="checkbox" id="owned_only" /></label>
         <label for="use_flight_total">Flight Fuel Total <input type="checkbox" id="use_flight_total" /></label>
@@ -1985,6 +2021,7 @@ var newDataFilterElements = [
     '#runway',
     '#min_capacity',
     '#min_circulation',
+    '#fuel_price',
     '#owned_only',
     '#use_flight_total',
 ]
@@ -2175,6 +2212,9 @@ unsafeWindow.updateModelInfo = function(modelId) {
     let airportFees = (baseSlotFee * plane_category + (Math.min(3, airportTo.size) + Math.min(3, airportFrom.size)) * model.capacity) * frequency;
     let servicesCost = (20 + serviceLevelCost * durationInHour) * model.capacity * 2 * frequency;
     let cost = fuelCost + crewCost + airportFees + depreciationRate + servicesCost + maintenance;
+    let costPerPax = cost / (model.capacity * frequency);
+    let fuelPrice = getFuelPriceInputValue();
+    let costPlusFuelPerPax = getCostPlusFuelPerPax(costPerPax, model.fuelBurn, model.capacity, fuelPrice);
 
     let staffTotal = Math.floor(basic + staffPerFrequency * frequency + staffPer1000Pax * model.capacity * frequency / 1000);
 
@@ -2184,7 +2224,8 @@ unsafeWindow.updateModelInfo = function(modelId) {
     $('#airplaneModelDetails #depreciation').text("$" + commaSeparateNumber(Math.floor(depreciationRate)));
     $('#airplaneModelDetails #SSPF').text("$" + commaSeparateNumber(Math.floor(servicesCost)));
     $('#airplaneModelDetails #maintenance').text("$" + commaSeparateNumber(Math.floor(maintenance)));
-    $('#airplaneModelDetails #cpp').text("$" + commaSeparateNumber(Math.floor(cost / (model.capacity * frequency))) + " * " + (model.capacity * frequency));
+    $('#airplaneModelDetails #cpp').text("$" + commaSeparateNumber(Math.floor(costPerPax)) + " * " + (model.capacity * frequency));
+    $('#airplaneModelDetails #cpp_with_fuel').text("$" + commaSeparateNumber(Math.floor(costPlusFuelPerPax)) + " (fuel @$" + formatFuelPriceLabel(fuelPrice) + ")");
     $('#airplaneModelDetails #cps').text("$" + commaSeparateNumber(Math.floor(cost / staffTotal)) + " * " + staffTotal);
 }
 
@@ -2238,6 +2279,12 @@ $("#airplaneModelDetails #speed").parent().after(`
         <h5>Cost per PAX:</h5>
     </div>
     <div class="value" id="cpp"></div>
+</div>
+<div class="table-row">
+    <div class="label">
+        <h5>Cost + fuel cost per PAX:</h5>
+    </div>
+    <div class="value" id="cpp_with_fuel"></div>
 </div>
 <div class="table-row">
     <div class="label">
@@ -2517,6 +2564,8 @@ function _genericUpdateModelInfo(modelId, routeInfo, containerSelector, serviceL
     let servicesCost = (20 + serviceLevelCost * durationInHour) * model.capacity * 2 * frequency;
     let totalCost = fuelCost + crewCost + airportFees + depreciationRate + servicesCost + maintenance;
     let costPerPax = totalCost / (model.capacity * frequency);
+    let fuelPrice = getFuelPriceInputValue();
+    let costPlusFuelPerPax = getCostPlusFuelPerPax(costPerPax, model.fuelBurn, model.capacity, fuelPrice);
 
     detailsHtml += `
         <div class="table-row"><div class="label"><h5>Fuel cost:</h5></div><div class="value" id="FCPF">$${commaSeparateNumber(Math.floor(fuelCost))}</div></div>
@@ -2526,6 +2575,7 @@ function _genericUpdateModelInfo(modelId, routeInfo, containerSelector, serviceL
         <div class="table-row"><div class="label"><h5>Service supplies:</h5></div><div class="value" id="SSPF">$${commaSeparateNumber(Math.floor(servicesCost))}</div></div>
         <div class="table-row"><div class="label"><h5>Maintenance (wip):</h5></div><div class="value" id="maintenance">$${commaSeparateNumber(Math.floor(maintenance))}</div></div>
         <div class="table-row"><div class="label"><h5>Cost per PAX:</h5></div><div class="value" id="cpp">$${commaSeparateNumber(Math.floor(costPerPax))}</div></div>
+        <div class="table-row"><div class="label"><h5>Cost + fuel cost per PAX:</h5></div><div class="value" id="cpp_with_fuel">$${commaSeparateNumber(Math.floor(costPlusFuelPerPax))} (fuel @$${formatFuelPriceLabel(fuelPrice)})</div></div>
         <div class="table-row"><div class="label">&#8205;</div></div>`;
 
     $container.find('#cpp-costs-container').html(detailsHtml);
