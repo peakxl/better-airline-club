@@ -22,6 +22,7 @@ var DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER = 0; // Changes default minimum num
 var DEFAULT_MIN_FLIGHT_RANGE_FILTER = 0;
 var DEFAULT_RUNWAY_LENGTH_FILTER = 3600;
 var DEFAULT_MIN_CAPACITY_FILTER = 0;
+var DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER = 0;
 var DEFAULT_FUEL_PRICE = 60;
 
 var MAIN_PANEL_WIDTH = '62%'; // Percent of screen for all the main (left-side) tables with lists (flight/airplane/etc)
@@ -1835,16 +1836,73 @@ function _getPlaneCategoryFor(plane) {
     console.error(`BAC+CPP:Error:: Cannot get category for plane ${JSON.stringify(plane)}`)
 }
 
+const AIRCRAFT_SIZE_BUCKETS = {
+    light: { min: 7, max: 68 },
+    regional: { min: 72, max: 150 },
+    medium: { min: 156, max: 250 },
+    large: { min: 266, max: 853 },
+};
+
+function getAircraftSizeBucketByCapacity(capacity) {
+    if (!Number.isFinite(capacity)) {
+        return null;
+    }
+
+    if (capacity >= AIRCRAFT_SIZE_BUCKETS.light.min && capacity <= AIRCRAFT_SIZE_BUCKETS.light.max) {
+        return 'light';
+    }
+    if (capacity >= AIRCRAFT_SIZE_BUCKETS.regional.min && capacity <= AIRCRAFT_SIZE_BUCKETS.regional.max) {
+        return 'regional';
+    }
+    if (capacity >= AIRCRAFT_SIZE_BUCKETS.medium.min && capacity <= AIRCRAFT_SIZE_BUCKETS.medium.max) {
+        return 'medium';
+    }
+    if (capacity >= AIRCRAFT_SIZE_BUCKETS.large.min && capacity <= AIRCRAFT_SIZE_BUCKETS.large.max) {
+        return 'large';
+    }
+    return null;
+}
+
+function getSelectedAircraftSizeFilters() {
+    const lightCheckbox = document.getElementById("size_filter_light");
+    const regionalCheckbox = document.getElementById("size_filter_regional");
+    const mediumCheckbox = document.getElementById("size_filter_medium");
+    const largeCheckbox = document.getElementById("size_filter_large");
+
+    return {
+        light: lightCheckbox ? !!lightCheckbox.checked : true,
+        regional: regionalCheckbox ? !!regionalCheckbox.checked : true,
+        medium: mediumCheckbox ? !!mediumCheckbox.checked : true,
+        large: largeCheckbox ? !!largeCheckbox.checked : true,
+    };
+}
+
+function isAircraftSizeEnabledForCapacity(capacity, selectedAircraftSizes) {
+    const bucket = getAircraftSizeBucketByCapacity(capacity);
+    if (!bucket) {
+        return true;
+    }
+    return !!selectedAircraftSizes[bucket];
+}
+
 let initialAirplaneModelStatsLoading = true;
 
 unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
     let distance = parseInt($("#flightRange").val(), 10);
     let runway = parseInt($("#runway").val(), 10);
     let min_capacity = parseInt($("#min_capacity").val(), 10);
+    let min_capacity_per_rotation = parseInt($("#min_capacity_per_rotation").val(), 10);
     let min_circulation = parseInt($("#min_circulation").val(), 10);
+
+    distance = Number.isFinite(distance) ? Math.max(distance, 0) : DEFAULT_MIN_FLIGHT_RANGE_FILTER;
+    runway = Number.isFinite(runway) ? Math.max(runway, 0) : DEFAULT_RUNWAY_LENGTH_FILTER;
+    min_capacity = Number.isFinite(min_capacity) ? Math.max(min_capacity, 0) : DEFAULT_MIN_CAPACITY_FILTER;
+    min_capacity_per_rotation = Number.isFinite(min_capacity_per_rotation) ? Math.max(min_capacity_per_rotation, 0) : DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER;
+    min_circulation = Number.isFinite(min_circulation) ? Math.max(min_circulation, 0) : DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER;
 
     let owned_only = document.getElementById("owned_only").checked;
     let use_flight_total = document.getElementById("use_flight_total").checked;
+    const selectedAircraftSizes = getSelectedAircraftSizeFilters();
     let fuelPrice = getFuelPriceInputValue();
 
     for (let plane of loadedModelsOwnerInfo) {
@@ -1866,9 +1924,8 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         let frequency = Math.floor(maxFlightMinutes / ((flightDuration + plane.turnaroundTime)*2));
 
         let flightTime = frequency * 2 * (flightDuration + plane.turnaroundTime);
-        let availableFlightMinutes = maxFlightMinutes - flightTime;
-        let utilisation = flightTime / (maxFlightMinutes - availableFlightMinutes);
-        let planeUtilisation = (maxFlightMinutes - availableFlightMinutes) / maxFlightMinutes;
+        let planeUtilisation = flightTime / maxFlightMinutes;
+        let utilisation = planeUtilisation;
 
         let decayRate = 100 / (plane.lifespan * 3) * (1 + 2 * planeUtilisation);
         let depreciationRate = Math.floor(price * (decayRate / 100) * utilisation);
@@ -1903,8 +1960,10 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
 
         plane.shouldShow = ((plane.cpp === -1)
            || (plane.max_capacity < min_capacity)
+           || (plane.capacity < min_capacity_per_rotation)
            || (plane.range < distance)
            || (plane.runwayRequirement > runway)
+           || (!isAircraftSizeEnabledForCapacity(plane.capacity, selectedAircraftSizes))
            || (plane.in_use < min_circulation && !plane.isOwned)
            || (owned_only && !plane.isOwned)) === false;
     }
@@ -2036,8 +2095,16 @@ $('#airplaneModelTable .table-header').html(`
 $("#airplaneCanvas .mainPanel .section .table .table-header:first").append(`
     <div class="cell detailsSelection">Distance: <input type="text" id="flightRange" value="${DEFAULT_MIN_FLIGHT_RANGE_FILTER}" /></div>
     <div class="cell detailsSelection">Runway length: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
-    <div class="cell detailsSelection">Min. Capacity: <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
+    <div class="cell detailsSelection">Min. Capacity (Total): <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
+    <div class="cell detailsSelection">Min. Seats/Rotation: <input type="text" id="min_capacity_per_rotation" value="${DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER}" /></div>
     <div class="cell detailsSelection">Min. Circulation: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
+    <div class="cell detailsSelection" style="min-width: 300px;">
+        Size:
+        <label for="size_filter_light" title="7-68 pax">Light <input type="checkbox" id="size_filter_light" checked /></label>
+        <label for="size_filter_regional" title="72-150 pax">Regional <input type="checkbox" id="size_filter_regional" checked /></label>
+        <label for="size_filter_medium" title="156-250 pax">Medium <input type="checkbox" id="size_filter_medium" checked /></label>
+        <label for="size_filter_large" title="266-853 pax">Large <input type="checkbox" id="size_filter_large" checked /></label>
+    </div>
     <div class="cell detailsSelection">Fuel price: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
     <div class="cell detailsSelection" style="min-width: 160px; text-align:right">
         <label for="owned_only">Owned Only <input type="checkbox" id="owned_only" /></label>
@@ -2056,7 +2123,12 @@ var newDataFilterElements = [
     '#flightRange',
     '#runway',
     '#min_capacity',
+    '#min_capacity_per_rotation',
     '#min_circulation',
+    '#size_filter_light',
+    '#size_filter_regional',
+    '#size_filter_medium',
+    '#size_filter_large',
     '#fuel_price',
     '#owned_only',
     '#use_flight_total',
@@ -2603,7 +2675,7 @@ function _genericUpdateModelInfo(modelId, routeInfo, containerSelector, serviceL
 
     let depreciationRate = Math.floor(model.price * (100 / (model.lifespan * 3) * (1 + 2 * planeUtilisation) / 100) * utilisation);
     let maintenance = model.capacity * 100 * utilisation;
-    let fuelCost = computeFuelCost(model.fuelBurn, frequency, routeInfo.distance);
+    let fuelCost = computeFuelCost(model.fuelBurn, routeInfo.distance, frequency);
     let crewCost = model.capacity * durationInHour * 12 * frequency;
     let airportFees = (baseSlotFee * plane_category + (Math.min(3, airportTo.size) + Math.min(3, airportFrom.size)) * model.capacity) * frequency;
     let servicesCost = (20 + serviceLevelCost * durationInHour) * model.capacity * 2 * frequency;
