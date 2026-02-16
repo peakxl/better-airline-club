@@ -2092,22 +2092,74 @@ $('#airplaneModelTable .table-header').html(`
     <div class="cell" style="width:  ${columnWidthPercents[13]}%; border-bottom: none;"></div><!-- New columns -->
 `);
 
-$("#airplaneCanvas .mainPanel .section .table .table-header:first").append(`
-    <div class="cell detailsSelection">Distance: <input type="text" id="flightRange" value="${DEFAULT_MIN_FLIGHT_RANGE_FILTER}" /></div>
-    <div class="cell detailsSelection">Runway length: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
-    <div class="cell detailsSelection">Min. Capacity (Total): <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
-    <div class="cell detailsSelection">Min. Seats/Rotation: <input type="text" id="min_capacity_per_rotation" value="${DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER}" /></div>
-    <div class="cell detailsSelection">Min. Circulation: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
-    <div class="cell detailsSelection" style="min-width: 300px;">
+const $marketFilterHeader = $("#airplaneCanvas .mainPanel .section .table .table-header:first");
+$marketFilterHeader.addClass("bac-market-filter-header");
+
+if (!document.getElementById("bac-market-filter-style")) {
+    $(`<style id="bac-market-filter-style">
+        #airplaneCanvas .bac-market-filter-header {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 6px 10px;
+            padding: 4px 0;
+        }
+        #airplaneCanvas .bac-market-filter-header > .cell {
+            border-bottom: none !important;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-filter-item {
+            width: auto !important;
+            min-width: 0;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            white-space: nowrap;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-filter-item input[type="text"] {
+            width: 64px;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-size-cell {
+            display: inline-flex;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 4px 8px;
+            min-width: 240px;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-size-cell label,
+        #airplaneCanvas .bac-market-filter-header .bac-market-toggle-cell label {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            margin: 0;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-toggle-cell {
+            margin-left: auto;
+            gap: 8px;
+        }
+        @media (max-width: 1450px) {
+            #airplaneCanvas .bac-market-filter-header .bac-market-toggle-cell {
+                margin-left: 0;
+            }
+        }
+    </style>`).appendTo("head");
+}
+
+$marketFilterHeader.append(`
+    <div class="cell detailsSelection bac-market-filter-item">Dist: <input type="text" id="flightRange" value="${DEFAULT_MIN_FLIGHT_RANGE_FILTER}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item">Runway: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item">Min Cap Total: <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item">Min Seats/Rot: <input type="text" id="min_capacity_per_rotation" value="${DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item">Min Circ: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item bac-market-size-cell">
         Size:
         <label for="size_filter_light" title="7-68 pax">Light <input type="checkbox" id="size_filter_light" checked /></label>
         <label for="size_filter_regional" title="72-150 pax">Regional <input type="checkbox" id="size_filter_regional" checked /></label>
         <label for="size_filter_medium" title="156-250 pax">Medium <input type="checkbox" id="size_filter_medium" checked /></label>
         <label for="size_filter_large" title="266-853 pax">Large <input type="checkbox" id="size_filter_large" checked /></label>
     </div>
-    <div class="cell detailsSelection">Fuel price: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
-    <div class="cell detailsSelection" style="min-width: 160px; text-align:right">
-        <label for="owned_only">Owned Only <input type="checkbox" id="owned_only" /></label>
+    <div class="cell detailsSelection bac-market-filter-item">Fuel: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
+    <div class="cell detailsSelection bac-market-filter-item bac-market-toggle-cell">
+        <label for="owned_only">Owned <input type="checkbox" id="owned_only" /></label>
         <label for="use_flight_total">Flight Fuel Total <input type="checkbox" id="use_flight_total" /></label>
     </div>
 `);
