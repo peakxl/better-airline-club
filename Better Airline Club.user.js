@@ -1010,21 +1010,54 @@ function launch(){
         linksTable.children("div.table-row").remove()
 
         loadedLinks = sortPreserveOrder(loadedLinks, sortProperty, sortOrder == "ascending")
+        const linkStyleStats = {};
 
-        function getKeyedStyleFromLink(link, keyName, ...args) {
+        function getStyleStatsForKey(keyName) {
+            if (linkStyleStats[keyName]) {
+                return linkStyleStats[keyName];
+            }
+
+            let sum = 0;
+            let count = 0;
+            let min = Number.POSITIVE_INFINITY;
+
+            for (const link of loadedLinks) {
+                const value = link[keyName];
+                if (!Number.isFinite(value)) {
+                    continue;
+                }
+
+                sum += value;
+                count += 1;
+                if (value < min) {
+                    min = value;
+                }
+            }
+
+            const avg = count > 0 ? sum / count : 0;
+            const normalizedMin = count > 0 ? Math.max(min, 0) : 0;
+
+            return linkStyleStats[keyName] = { avg, min: normalizedMin };
+        }
+
+        function getKeyedStyleFromLink(link, keyName, minOverride, maxOverride) {
             if (!colorKeyMaps[keyName]) {
                 colorKeyMaps[keyName] = new WeakMap();
             } else if (colorKeyMaps[keyName].has(link)) {
                 return colorKeyMaps[keyName].get(link);
             }
 
-            var data = loadedLinks.map(l => l[keyName]);
+            let avg = 0;
+            let min = 0;
+            if (minOverride === undefined || maxOverride === undefined) {
+                const stats = getStyleStatsForKey(keyName);
+                avg = stats.avg;
+                min = stats.min;
+            }
+            const lowerBound = minOverride !== undefined ? minOverride : min;
+            const upperBound = maxOverride !== undefined ? maxOverride : (avg * .618);
 
-            var avg = data.reduce((sum, acc) => sum += acc, 0) / loadedLinks.length;
-            var max = Math.max(...data);
-            var min = Math.max(Math.min(...data), 0);
-
-            var tier = getTierFromPercent(link[keyName], args[0] !== undefined ? args[0] : min, args[1] || (avg * .618));
+            var tier = getTierFromPercent(link[keyName], lowerBound, upperBound);
             if (!link.tiers) {
                 link.tiers = {};
             }
@@ -1038,6 +1071,7 @@ function launch(){
             return colorResult;
         }
 
+        const rows = [];
         $.each(loadedLinks, function(index, link) {
             var row = $("<div class='table-row clickable' onclick='selectLinkFromTable($(this), " + link.id + ")'></div>")
 
@@ -1093,8 +1127,10 @@ function launch(){
                 row.css({'text-shadow': '0 0 3px red'});
             }
 
-            linksTable.append(row)
+            rows.push(row)
         });
+
+        linksTable.append(rows)
     }
 
     unsafeWindow.refreshLinkDetails = async function refreshLinkDetails(linkId) {
@@ -2043,9 +2079,18 @@ let idTo = -1;
 let airportFrom;
 let airportTo;
 let _modelId = -1;
+let queuedModelInfoRefresh = false;
 
 let observer = new MutationObserver(function(mutations) {
-    updateModelInfo(_modelId);
+    if (queuedModelInfoRefresh) {
+        return;
+    }
+
+    queuedModelInfoRefresh = true;
+    requestAnimationFrame(() => {
+        queuedModelInfoRefresh = false;
+        updateModelInfo(_modelId);
+    });
 });
 
 observer.observe(
