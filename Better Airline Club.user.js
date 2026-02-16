@@ -1958,6 +1958,7 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         plane.fuel_total = ((plane.fbpf + airport_fee + inflight_cost + crew_cost) * plane.max_rotation + depreciationRate + maintenance);
         plane.cpp = plane.fuel_total / (plane.capacity * plane.max_rotation);
         plane.cpp_plus_fuel = getCostPlusFuelPerPax(plane.cpp, plane.fuelBurn, plane.capacity, fuelPrice);
+        plane.fuel_per_pax = (plane.capacity > 0) ? ((plane.fuelBurn / plane.capacity) * fuelPrice) : 0;
         plane.max_capacity = plane.weekly_capacity;
         const costPerPaxForProfit = use_flight_total ? plane.cpp_plus_fuel : plane.cpp;
         plane.expected_profit_weekly = Number.isFinite(costPerPaxForProfit)
@@ -2015,6 +2016,12 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         .filter(v => Number.isFinite(v));
     var cppMax = cppValues.length ? Math.max(...cppValues) : 0;
     var cppMin = cppValues.length ? Math.max(Math.min(...cppValues), 0) : 0;
+    var fuelPerPaxValues = loadedModelsOwnerInfo
+        .filter(l => l.shouldShow)
+        .map(l => l.fuel_per_pax)
+        .filter(v => Number.isFinite(v));
+    var fuelPerPaxMax = fuelPerPaxValues.length ? Math.max(...fuelPerPaxValues) : 0;
+    var fuelPerPaxMin = fuelPerPaxValues.length ? Math.max(Math.min(...fuelPerPaxValues), 0) : 0;
     var expectedProfitValues = loadedModelsOwnerInfo
         .filter(l => l.shouldShow)
         .map(l => l.expected_profit_weekly)
@@ -2048,6 +2055,16 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         return getStyleFromTier(getTierFromPercent(-1 * paybackWeeks, -1 * paybackMax, -1 * paybackMin));
     }
 
+    function getFuelPerPaxStyle(fuelPerPax) {
+        if (!Number.isFinite(fuelPerPax)) {
+            return "color: inherit;";
+        }
+        if (fuelPerPaxMax === fuelPerPaxMin) {
+            return "color: inherit;";
+        }
+        return getStyleFromTier(getTierFromPercent(-1 * fuelPerPax, -1 * fuelPerPaxMax, -1 * fuelPerPaxMin));
+    }
+
     $.each(loadedModelsOwnerInfo, function(index, modelOwnerInfo) {
         if (!modelOwnerInfo.shouldShow) {
             return;
@@ -2073,11 +2090,12 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
             : modelOwnerInfo.max_rotation.toString();
         row.append("<div class='cell' align='right' title='scheduled/max'>" + scheduledRotationText + "</div>")
         let displayedCpp = use_flight_total ? modelOwnerInfo.cpp_plus_fuel : modelOwnerInfo.cpp;
-        let fuelCostPerPax = (modelOwnerInfo.capacity > 0) ? ((modelOwnerInfo.fuelBurn / modelOwnerInfo.capacity) * fuelPrice) : 0;
+        let fuelCostPerPax = modelOwnerInfo.fuel_per_pax;
         let cppTooltip = use_flight_total
             ? (`${commaSeparateNumber(Math.round(modelOwnerInfo.cpp))} + ${commaSeparateNumber(Math.round(fuelCostPerPax))} fuel (@$${formatFuelPriceLabel(fuelPrice)})`)
             : (`${commaSeparateNumber(Math.round(modelOwnerInfo.fuel_total))}/total (${commaSeparateNumber(Math.round(modelOwnerInfo.cpp * modelOwnerInfo.capacity))}/flight)`);
         row.append("<div class='cell' align='right' style='"+ getStyleFromTier(getTierFromPercent(-1*displayedCpp, -1*cppMax, -1*cppMin)) +"' title='"+ cppTooltip +"'>" + commaSeparateNumber(Math.round(displayedCpp)) + "</div>")
+        row.append("<div class='cell' align='right' style='" + getFuelPerPaxStyle(fuelCostPerPax) + "' title='Fuel cost per pax at @$" + formatFuelPriceLabel(fuelPrice) + "'>" + "$" + commaSeparateNumber(Math.round(fuelCostPerPax)) + "</div>")
         let roundedExpectedProfit = Math.round(modelOwnerInfo.expected_profit_weekly);
         let expectedProfitText = Number.isFinite(roundedExpectedProfit)
             ? ((roundedExpectedProfit < 0 ? "-" : "") + "$" + commaSeparateNumber(Math.abs(roundedExpectedProfit)))
@@ -2108,22 +2126,23 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
 }
 
 const columnWidthPercents = [
-    13,
-    8,
-    7,
-    7,
-    6,
-    5,
-    4,
-    6,
-    5,
-    5,
-    4,
-    6,
+    12,
     8,
     6,
+    7,
+    6,
+    5,
     4,
-    6
+    6,
+    5,
+    4,
+    4,
+    5,
+    5,
+    8,
+    6,
+    4,
+    5
 ];
 
 if (columnWidthPercents.reduce((sum, val) => sum += val, 0) !== 100) {
@@ -2133,6 +2152,7 @@ if (columnWidthPercents.reduce((sum, val) => sum += val, 0) !== 100) {
 
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Scheduled flights per week (capped by Max Scheduled when set)\" data-sort-property=\"scheduled_rotation\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">Sched</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Cost Per Pax\" data-sort-property=\"cpp\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">$/🧍</div>");
+$("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Fuel cost per pax (uses Fuel input)\" data-sort-property=\"fuel_per_pax\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">Fuel/🧍</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Expected weekly profit (assumes all economy ticket price)\" data-sort-property=\"expected_profit_weekly\" data-sort-order=\"descending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">$/wk</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Payback time in weeks\" data-sort-property=\"payback_weeks\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">Payback</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Discount Percent (influcenced by demand & brand loyalties)\" data-sort-property=\"discountPercent\" data-sort-order=\"descending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">%🔽</div>");
@@ -2160,6 +2180,7 @@ $('#airplaneModelTable .table-header').html(`
     <div class="cell" style="width:  ${columnWidthPercents[13]}%; border-bottom: none;"></div><!-- New columns -->
     <div class="cell" style="width:  ${columnWidthPercents[14]}%; border-bottom: none;"></div><!-- New columns -->
     <div class="cell" style="width:  ${columnWidthPercents[15]}%; border-bottom: none;"></div><!-- New columns -->
+    <div class="cell" style="width:  ${columnWidthPercents[16]}%; border-bottom: none;"></div><!-- New columns -->
 `);
 
 const $marketFilterHeader = $("#airplaneCanvas .mainPanel .section .table .table-header:first");
