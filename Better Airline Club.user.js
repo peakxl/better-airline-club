@@ -23,6 +23,8 @@ var DEFAULT_MIN_FLIGHT_RANGE_FILTER = 0;
 var DEFAULT_RUNWAY_LENGTH_FILTER = 3600;
 var DEFAULT_MIN_CAPACITY_FILTER = 0;
 var DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER = 0;
+var DEFAULT_ASSUMED_ECONOMY_TICKET_PRICE = 120;
+var DEFAULT_MAX_SCHEDULED_FILTER = 0;
 var DEFAULT_FUEL_PRICE = 60;
 
 var MAIN_PANEL_WIDTH = '62%'; // Percent of screen for all the main (left-side) tables with lists (flight/airplane/etc)
@@ -1814,6 +1816,16 @@ function formatFuelPriceLabel(fuelPrice) {
     return Number.isInteger(fuelPrice) ? fuelPrice.toString() : fuelPrice.toFixed(2);
 }
 
+function formatPaybackWeeks(weeks) {
+    if (!Number.isFinite(weeks) || weeks < 0) {
+        return "N/A";
+    }
+    if (weeks >= 52) {
+        return `${(weeks / 52).toFixed(1)}y`;
+    }
+    return `${weeks.toFixed(1)}w`;
+}
+
 function _getPlaneCategoryFor(plane) {
     switch (plane.airplaneType.toUpperCase()) {
         case 'LIGHT':
@@ -1893,12 +1905,16 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
     let min_capacity = parseInt($("#min_capacity").val(), 10);
     let min_capacity_per_rotation = parseInt($("#min_capacity_per_rotation").val(), 10);
     let min_circulation = parseInt($("#min_circulation").val(), 10);
+    let assumed_economy_ticket_price = parseFloat($("#assumed_economy_ticket_price").val());
+    let max_scheduled = parseInt($("#max_scheduled").val(), 10);
 
     distance = Number.isFinite(distance) ? Math.max(distance, 0) : DEFAULT_MIN_FLIGHT_RANGE_FILTER;
     runway = Number.isFinite(runway) ? Math.max(runway, 0) : DEFAULT_RUNWAY_LENGTH_FILTER;
     min_capacity = Number.isFinite(min_capacity) ? Math.max(min_capacity, 0) : DEFAULT_MIN_CAPACITY_FILTER;
     min_capacity_per_rotation = Number.isFinite(min_capacity_per_rotation) ? Math.max(min_capacity_per_rotation, 0) : DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER;
     min_circulation = Number.isFinite(min_circulation) ? Math.max(min_circulation, 0) : DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER;
+    assumed_economy_ticket_price = Number.isFinite(assumed_economy_ticket_price) ? Math.max(assumed_economy_ticket_price, 0) : DEFAULT_ASSUMED_ECONOMY_TICKET_PRICE;
+    max_scheduled = Number.isFinite(max_scheduled) ? Math.max(max_scheduled, 0) : DEFAULT_MAX_SCHEDULED_FILTER;
 
     let owned_only = document.getElementById("owned_only").checked;
     let use_flight_total = document.getElementById("use_flight_total").checked;
@@ -1936,11 +1952,18 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         let inflight_cost = (20 + 8 * flightDuration / 60) * plane.capacity * 2;
 
         plane.max_rotation = frequency;
+        plane.scheduled_rotation = max_scheduled > 0 ? Math.min(plane.max_rotation, max_scheduled) : plane.max_rotation;
+        plane.weekly_capacity = plane.capacity * plane.scheduled_rotation;
         plane.fbpf = computeFuelCost(plane.fuelBurn, distance, 1);
         plane.fuel_total = ((plane.fbpf + airport_fee + inflight_cost + crew_cost) * plane.max_rotation + depreciationRate + maintenance);
         plane.cpp = plane.fuel_total / (plane.capacity * plane.max_rotation);
         plane.cpp_plus_fuel = getCostPlusFuelPerPax(plane.cpp, plane.fuelBurn, plane.capacity, fuelPrice);
-        plane.max_capacity = plane.capacity * plane.max_rotation;
+        plane.max_capacity = plane.weekly_capacity;
+        const costPerPaxForProfit = use_flight_total ? plane.cpp_plus_fuel : plane.cpp;
+        plane.expected_profit_weekly = Number.isFinite(costPerPaxForProfit)
+            ? (assumed_economy_ticket_price - costPerPaxForProfit) * plane.weekly_capacity
+            : Number.NaN;
+        plane.payback_weeks = plane.expected_profit_weekly > 0 ? (plane.price / plane.expected_profit_weekly) : Number.POSITIVE_INFINITY;
 
         plane.discountPercent = (plane.originalPrice) ? Math.round(100 - (plane.price / plane.originalPrice * 100)) : 0;
 
@@ -1992,6 +2015,38 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         .filter(v => Number.isFinite(v));
     var cppMax = cppValues.length ? Math.max(...cppValues) : 0;
     var cppMin = cppValues.length ? Math.max(Math.min(...cppValues), 0) : 0;
+    var expectedProfitValues = loadedModelsOwnerInfo
+        .filter(l => l.shouldShow)
+        .map(l => l.expected_profit_weekly)
+        .filter(v => Number.isFinite(v));
+    var expectedProfitMax = expectedProfitValues.length ? Math.max(...expectedProfitValues) : 0;
+    var expectedProfitMin = expectedProfitValues.length ? Math.min(...expectedProfitValues) : 0;
+    var paybackValues = loadedModelsOwnerInfo
+        .filter(l => l.shouldShow)
+        .map(l => l.payback_weeks)
+        .filter(v => Number.isFinite(v) && v >= 0);
+    var paybackMax = paybackValues.length ? Math.max(...paybackValues) : 0;
+    var paybackMin = paybackValues.length ? Math.min(...paybackValues) : 0;
+
+    function getExpectedProfitStyle(expectedProfit) {
+        if (!Number.isFinite(expectedProfit)) {
+            return "color: inherit;";
+        }
+        if (expectedProfitMax === expectedProfitMin) {
+            return getStyleFromTier(expectedProfit >= 0 ? 1 : 4);
+        }
+        return getStyleFromTier(getTierFromPercent(expectedProfit, expectedProfitMin, expectedProfitMax));
+    }
+
+    function getPaybackStyle(paybackWeeks) {
+        if (!Number.isFinite(paybackWeeks) || paybackWeeks < 0) {
+            return getStyleFromTier(5);
+        }
+        if (paybackMax === paybackMin) {
+            return getStyleFromTier(1);
+        }
+        return getStyleFromTier(getTierFromPercent(-1 * paybackWeeks, -1 * paybackMax, -1 * paybackMin));
+    }
 
     $.each(loadedModelsOwnerInfo, function(index, modelOwnerInfo) {
         if (!modelOwnerInfo.shouldShow) {
@@ -2006,20 +2061,29 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
         }
         row.append("<div class='cell' style='text-overflow: ellipsis;text-wrap: nowrap;overflow: clip;' title='"+modelOwnerInfo.family+"'>" + modelOwnerInfo.family + "</div>")
         row.append("<div class='cell' align='right'>" + commaSeparateNumber(modelOwnerInfo.price) + "</div>")
-        row.append("<div class='cell' align='right'>" + modelOwnerInfo.capacity + " (" + (modelOwnerInfo.capacity * modelOwnerInfo.max_rotation) + ")</div>")
+        row.append("<div class='cell' align='right'>" + modelOwnerInfo.capacity + " (" + modelOwnerInfo.weekly_capacity + ")</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.range + " km</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.fuelBurn + "</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.lifespan / 52 + " yrs</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.speed + " km/h</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.runwayRequirement + " m</div>")
         row.append("<div class='cell' align='right'>" + modelOwnerInfo.assignedAirplanes.length + "/" + modelOwnerInfo.availableAirplanes.length + "/" + modelOwnerInfo.constructingAirplanes.length + "</div>")
-        row.append("<div class='cell' align='right'>" + modelOwnerInfo.max_rotation + "</div>")
+        let scheduledRotationText = max_scheduled > 0
+            ? (modelOwnerInfo.scheduled_rotation + "/" + modelOwnerInfo.max_rotation)
+            : modelOwnerInfo.max_rotation.toString();
+        row.append("<div class='cell' align='right' title='scheduled/max'>" + scheduledRotationText + "</div>")
         let displayedCpp = use_flight_total ? modelOwnerInfo.cpp_plus_fuel : modelOwnerInfo.cpp;
         let fuelCostPerPax = (modelOwnerInfo.capacity > 0) ? ((modelOwnerInfo.fuelBurn / modelOwnerInfo.capacity) * fuelPrice) : 0;
         let cppTooltip = use_flight_total
             ? (`${commaSeparateNumber(Math.round(modelOwnerInfo.cpp))} + ${commaSeparateNumber(Math.round(fuelCostPerPax))} fuel (@$${formatFuelPriceLabel(fuelPrice)})`)
             : (`${commaSeparateNumber(Math.round(modelOwnerInfo.fuel_total))}/total (${commaSeparateNumber(Math.round(modelOwnerInfo.cpp * modelOwnerInfo.capacity))}/flight)`);
         row.append("<div class='cell' align='right' style='"+ getStyleFromTier(getTierFromPercent(-1*displayedCpp, -1*cppMax, -1*cppMin)) +"' title='"+ cppTooltip +"'>" + commaSeparateNumber(Math.round(displayedCpp)) + "</div>")
+        let roundedExpectedProfit = Math.round(modelOwnerInfo.expected_profit_weekly);
+        let expectedProfitText = Number.isFinite(roundedExpectedProfit)
+            ? ((roundedExpectedProfit < 0 ? "-" : "") + "$" + commaSeparateNumber(Math.abs(roundedExpectedProfit)))
+            : "N/A";
+        row.append("<div class='cell' align='right' style='" + getExpectedProfitStyle(modelOwnerInfo.expected_profit_weekly) + "' title='All-economy ticket: $" + formatFuelPriceLabel(assumed_economy_ticket_price) + "'>" + expectedProfitText + "</div>")
+        row.append("<div class='cell' align='right' style='" + getPaybackStyle(modelOwnerInfo.payback_weeks) + "' title='" + (Number.isFinite(modelOwnerInfo.payback_weeks) ? (modelOwnerInfo.payback_weeks.toFixed(1) + " weeks") : "No payback (non-positive expected profit)") + "'>" + formatPaybackWeeks(modelOwnerInfo.payback_weeks) + "</div>")
 
         let discountTier;
         if (modelOwnerInfo.discountPercent > 40) {
@@ -2044,20 +2108,22 @@ unsafeWindow.updateAirplaneModelTable = function(sortProperty, sortOrder) {
 }
 
 const columnWidthPercents = [
-    17,
-    9,
+    13,
     8,
     7,
     7,
-    7,
-    7,
-    9,
-    7,
     6,
-    3,
     5,
     4,
-    4
+    6,
+    5,
+    5,
+    4,
+    6,
+    8,
+    6,
+    4,
+    6
 ];
 
 if (columnWidthPercents.reduce((sum, val) => sum += val, 0) !== 100) {
@@ -2065,8 +2131,10 @@ if (columnWidthPercents.reduce((sum, val) => sum += val, 0) !== 100) {
 }
 
 
-$("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Max flight rotations (uses user-set distance above)\" data-sort-property=\"max_rotation\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">⏲</div>");
+$("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Scheduled flights per week (capped by Max Scheduled when set)\" data-sort-property=\"scheduled_rotation\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">Sched</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Cost Per Pax\" data-sort-property=\"cpp\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">$/🧍</div>");
+$("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Expected weekly profit (assumes all economy ticket price)\" data-sort-property=\"expected_profit_weekly\" data-sort-order=\"descending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">$/wk</div>");
+$("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Payback time in weeks\" data-sort-property=\"payback_weeks\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">Payback</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Discount Percent (influcenced by demand & brand loyalties)\" data-sort-property=\"discountPercent\" data-sort-order=\"descending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">%🔽</div>");
 $("#airplaneModelSortHeader").append("<div class=\"cell clickable\" title=\"Total number in circulation (all players, game wide)\" data-sort-property=\"in_use\" data-sort-order=\"ascending\" onclick=\"toggleAirplaneModelTableSortOrder($(this))\" align=\"right\">#✈</div>");
 
@@ -2090,6 +2158,8 @@ $('#airplaneModelTable .table-header').html(`
     <div class="cell" style="width:  ${columnWidthPercents[11]}%; border-bottom: none;"></div><!-- New columns -->
     <div class="cell" style="width:  ${columnWidthPercents[12]}%; border-bottom: none;"></div><!-- New columns -->
     <div class="cell" style="width:  ${columnWidthPercents[13]}%; border-bottom: none;"></div><!-- New columns -->
+    <div class="cell" style="width:  ${columnWidthPercents[14]}%; border-bottom: none;"></div><!-- New columns -->
+    <div class="cell" style="width:  ${columnWidthPercents[15]}%; border-bottom: none;"></div><!-- New columns -->
 `);
 
 const $marketFilterHeader = $("#airplaneCanvas .mainPanel .section .table .table-header:first");
@@ -2098,14 +2168,23 @@ $marketFilterHeader.addClass("bac-market-filter-header");
 if (!document.getElementById("bac-market-filter-style")) {
     $(`<style id="bac-market-filter-style">
         #airplaneCanvas .bac-market-filter-header {
-            display: flex;
-            flex-wrap: wrap;
-            align-items: center;
-            gap: 6px 10px;
+            display: block;
             padding: 4px 0;
         }
-        #airplaneCanvas .bac-market-filter-header > .cell {
+        #airplaneCanvas .bac-market-filter-header .cell {
             border-bottom: none !important;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-filter-row {
+            display: flex;
+            flex-wrap: nowrap;
+            align-items: center;
+            gap: 6px 10px;
+            width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+        #airplaneCanvas .bac-market-filter-header .bac-market-filter-row + .bac-market-filter-row {
+            margin-top: 6px;
         }
         #airplaneCanvas .bac-market-filter-header .bac-market-filter-item {
             width: auto !important;
@@ -2121,9 +2200,9 @@ if (!document.getElementById("bac-market-filter-style")) {
         #airplaneCanvas .bac-market-filter-header .bac-market-size-cell {
             display: inline-flex;
             align-items: center;
-            flex-wrap: wrap;
+            flex-wrap: nowrap;
             gap: 4px 8px;
-            min-width: 240px;
+            min-width: 360px;
         }
         #airplaneCanvas .bac-market-filter-header .bac-market-size-cell label,
         #airplaneCanvas .bac-market-filter-header .bac-market-toggle-cell label {
@@ -2140,31 +2219,42 @@ if (!document.getElementById("bac-market-filter-style")) {
             #airplaneCanvas .bac-market-filter-header .bac-market-toggle-cell {
                 margin-left: 0;
             }
+            #airplaneCanvas .bac-market-filter-header .bac-market-size-cell {
+                min-width: 240px;
+            }
         }
     </style>`).appendTo("head");
 }
 
 $marketFilterHeader.append(`
-    <div class="cell detailsSelection bac-market-filter-item">Dist: <input type="text" id="flightRange" value="${DEFAULT_MIN_FLIGHT_RANGE_FILTER}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item">Runway: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item">Min Cap Total: <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item">Min Seats/Rot: <input type="text" id="min_capacity_per_rotation" value="${DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item">Min Circ: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item bac-market-size-cell">
-        Size:
-        <label for="size_filter_light" title="7-68 pax">Light <input type="checkbox" id="size_filter_light" checked /></label>
-        <label for="size_filter_regional" title="72-150 pax">Regional <input type="checkbox" id="size_filter_regional" checked /></label>
-        <label for="size_filter_medium" title="156-250 pax">Medium <input type="checkbox" id="size_filter_medium" checked /></label>
-        <label for="size_filter_large" title="266-853 pax">Large <input type="checkbox" id="size_filter_large" checked /></label>
+    <div class="bac-market-filter-row bac-market-filter-row-1">
+        <div class="cell detailsSelection bac-market-filter-item">Dist: <input type="text" id="flightRange" value="${DEFAULT_MIN_FLIGHT_RANGE_FILTER}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Runway: <input type="text" id="runway" value="${DEFAULT_RUNWAY_LENGTH_FILTER}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Min Cap Total: <input type="text" id="min_capacity" value="${DEFAULT_MIN_CAPACITY_FILTER}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Min Seats/Rot: <input type="text" id="min_capacity_per_rotation" value="${DEFAULT_MIN_CAPACITY_PER_ROTATION_FILTER}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Min Circ: <input type="text" id="min_circulation" value="${DEFAULT_MIN_PLANES_IN_CIRCULATION_FILTER}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Max Scheduled: <input type="text" id="max_scheduled" value="${DEFAULT_MAX_SCHEDULED_FILTER}" /></div>
     </div>
-    <div class="cell detailsSelection bac-market-filter-item">Fuel: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
-    <div class="cell detailsSelection bac-market-filter-item bac-market-toggle-cell">
-        <label for="owned_only">Owned <input type="checkbox" id="owned_only" /></label>
-        <label for="use_flight_total">Flight Fuel Total <input type="checkbox" id="use_flight_total" /></label>
+    <div class="bac-market-filter-row bac-market-filter-row-2">
+        <div class="cell detailsSelection bac-market-filter-item">Ticket (Eco): <input type="text" id="assumed_economy_ticket_price" value="${DEFAULT_ASSUMED_ECONOMY_TICKET_PRICE}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item">Fuel: <input type="text" id="fuel_price" value="${DEFAULT_FUEL_PRICE}" /></div>
+        <div class="cell detailsSelection bac-market-filter-item bac-market-size-cell">
+            Size:
+            <label for="size_filter_light" title="7-68 pax">Light <input type="checkbox" id="size_filter_light" checked /></label>
+            <label for="size_filter_regional" title="72-150 pax">Regional <input type="checkbox" id="size_filter_regional" checked /></label>
+            <label for="size_filter_medium" title="156-250 pax">Medium <input type="checkbox" id="size_filter_medium" checked /></label>
+            <label for="size_filter_large" title="266-853 pax">Large <input type="checkbox" id="size_filter_large" checked /></label>
+        </div>
+        <div class="cell detailsSelection bac-market-filter-item bac-market-toggle-cell">
+            <label for="owned_only">Owned <input type="checkbox" id="owned_only" /></label>
+            <label for="use_flight_total">Flight Fuel Total <input type="checkbox" id="use_flight_total" /></label>
+        </div>
     </div>
 `);
 
 
+$("#airplaneCanvas .mainPanel").css({width: "72%"});
+$("#airplaneCanvas .sidePanel").css({width: "28%"});
 $("#airplaneCanvas .mainPanel .section .detailsGroup .market.details").attr({style: 'width: 100%; height: calc(100% - 30px); display: block;'});
 
 $('[data-sort-property="totalOwned"]').text('Owned')
@@ -2177,6 +2267,8 @@ var newDataFilterElements = [
     '#min_capacity',
     '#min_capacity_per_rotation',
     '#min_circulation',
+    '#max_scheduled',
+    '#assumed_economy_ticket_price',
     '#size_filter_light',
     '#size_filter_regional',
     '#size_filter_medium',
