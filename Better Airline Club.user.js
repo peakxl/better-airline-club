@@ -194,6 +194,61 @@ async function _loadOriginBreakdownForLink(airlineId, linkId) {
     return _getOriginBreakdownFromPassengerMap(passengerMap, linkId);
 }
 
+function _getDefaultLinksTableColumnWidths() {
+    // [tiers, from, to, model, dist, capacity, pax, transit, lf, sf, revenue, profit, gain, $/pax, $/flight, $/hour, $/staff]
+    return [2, 8, 8, 7, 6, 9, 4, 5, 5, 7, 7, 5, 5, 6, 6, 6, 4];
+}
+
+function _computeAutoLinksTableColumnWidths(links) {
+    const baseWeights = _getDefaultLinksTableColumnWidths();
+    if (!Array.isArray(links) || links.length === 0) {
+        return baseWeights;
+    }
+
+    const baselineLengths = [2, 3, 3, 8, 6, 10, 6, 12, 6, 6, 8, 8, 6, 8, 8, 8, 8];
+    const maxExtraWeights = [0, 3, 3, 3, 2, 3, 2, 3, 2, 2, 3, 3, 2, 2, 2, 2, 2];
+    const maxLengths = baselineLengths.slice();
+    const sampleCount = Math.min(links.length, 120);
+
+    for (let i = 0; i < sampleCount; i++) {
+        const link = links[i];
+        const transitPax = Number.isFinite(link.transitPax) ? link.transitPax : 0;
+        const transitPaxPercent = link.totalPassengers > 0 ? ((transitPax / link.totalPassengers) * 100) : 0;
+
+        const values = [
+            `${Number.isFinite(link.tiersRank) ? link.tiersRank : 99}`,
+            `${link.fromAirportCode || ''}`,
+            `${link.toAirportCode || ''}`,
+            `${getShortModelName(link.model || '')}`,
+            `${link.distance || 0}km`,
+            `${link.totalCapacity || 0} (${link.frequency || 0})`,
+            `${link.totalPassengers || 0}`,
+            `${transitPax} (${transitPaxPercent.toFixed(1)}%)`,
+            `${link.totalLoadFactor || 0}%`,
+            `${Math.round(Math.max((link.satisfaction || 0) - 0.6, 0) * 250)}%`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.revenue) ? link.revenue : 0)}`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.profit) ? link.profit : 0)}`,
+            `${Math.round(Number.isFinite(link.profitMargin) ? link.profitMargin : 0)}%`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerPax) ? link.profitPerPax : 0)}`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerFlight) ? link.profitPerFlight : 0)}`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerHour) ? link.profitPerHour : 0)}`,
+            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerStaff) ? link.profitPerStaff : 0)}`,
+        ];
+
+        for (let col = 0; col < values.length; col++) {
+            maxLengths[col] = Math.max(maxLengths[col], values[col].length);
+        }
+    }
+
+    const dynamicWeights = baseWeights.map((baseWeight, index) => {
+        const extraByLength = Math.max(0, maxLengths[index] - baselineLengths[index]) / 4;
+        return baseWeight + Math.min(maxExtraWeights[index], extraByLength);
+    });
+
+    const totalWeight = dynamicWeights.reduce((sum, weight) => sum + weight, 0);
+    return dynamicWeights.map(weight => (weight / totalWeight) * 100);
+}
+
 
 function getAirportText(city, airportCode) {
     if (city) {
@@ -953,10 +1008,10 @@ function launch(){
         $("#setFavoriteModal").data("model", model)
     }
 
-    unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader() {
-        if ($('#linksTableSortHeader').children().length === 18) {
-            return;
-        }
+    unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader(widths) {
+        const columnWidths = (Array.isArray(widths) && widths.length === 17)
+            ? widths
+            : _getDefaultLinksTableColumnWidths();
 
         $('#linksCanvas .mainPanel').css({width: MAIN_PANEL_WIDTH});
         $('#linksCanvas .sidePanel').css({width: SIDE_PANEL_WIDTH});
@@ -964,71 +1019,47 @@ function launch(){
         $('#canvas .mainPanel').css({width: MAIN_PANEL_WIDTH});
         $('#canvas .sidePanel').css({width: SIDE_PANEL_WIDTH});
 
-        // [KEPT] Column widths from Script 1
-        const widths = [
-            8,
-            8,
-            7,
-            6,
-            9,
-            4,
-            4,
-            5,
-            5,
-            7,
-            7,
-            5,
-            5,
-            6,
-            6,
-            6,
-            2, // tiers rank, first
-        ];
-
-        const sum = widths.reduce((acc, val) => acc + val, 0);
-        if (sum !== 100) {
-            console.warn(`Column widths to not add up to 100: ${sum} (${widths.join(',')}) -- ${sum < 100 ? 'Remaining' : 'Over by'}: ${sum < 100 ? 100 - sum : sum - 100}%`)
-        }
+        const width = index => `${columnWidths[index].toFixed(2)}%`;
 
         $('#linksTableSortHeader').html(`
-            <div class="cell clickable" style="width: ${widths[16]}%" data-sort-property="tiersRank" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))" title="Aggregated Rank">#</div>
-            <div class="cell clickable" style="width: ${widths[0]}%" data-sort-property="fromAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">From</div>
+            <div class="cell clickable" style="width: ${width(0)}" data-sort-property="tiersRank" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))" title="Aggregated Rank">#</div>
+            <div class="cell clickable" style="width: ${width(1)}" data-sort-property="fromAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">From</div>
             <div class="cell clickable" style="width: 0%" data-sort-property="lastUpdate" data-sort-order="ascending" id="hiddenLinkSortBy"></div> <!--hidden column for last update (cannot be first otherwise the left round corner would not work -->
-            <div class="cell clickable" style="width: ${widths[1]}%" data-sort-property="toAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">To</div>
-            <div class="cell clickable" style="width: ${widths[2]}%" data-sort-property="model" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Model</div>
-            <div class="cell clickable" style="width: ${widths[3]}%" align="right" data-sort-property="distance" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Dist.</div>
-            <div class="cell clickable" style="width: ${widths[4]}%" align="right" data-sort-property="totalCapacity" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Capacity (Freq.)</div>
-            <div class="cell clickable" style="width: ${widths[5]}%" align="right" data-sort-property="totalPassengers" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Pax</div>
-            <div class="cell clickable" style="width: ${widths[6]}%" align="right" data-sort-property="transitPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Transit Pax (Home T + Destination T) and % of all pax">Transit</div>
-            <div class="cell clickable" style="width: ${widths[7]}%" align="right" data-sort-property="totalLoadFactor" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Load Factor">LF</div>
-            <div class="cell clickable" style="width: ${widths[8]}%" align="right" data-sort-property="satisfaction" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Satisfaction Factor">SF</div>
-            <div class="cell clickable" style="width: ${widths[9]}%" align="right" data-sort-property="revenue" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Revenue</div>
-            <div class="cell clickable" style="width: ${widths[10]}%" align="right" data-sort-property="profit" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">Profit</div>
-            <div class="cell clickable" style="width: ${widths[11]}%" align="right" data-sort-property="profitMargin" title="Profit Margin" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Gain</div>
-            <div class="cell clickable" style="width: ${widths[12]}%" align="right" data-sort-property="profitPerPax" title="Profit PerPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/🧍</div>
-            <div class="cell clickable" style="width: ${widths[13]}%" align="right" data-sort-property="profitPerFlight" title="Profit Per Flight" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/✈</div>
-            <div class="cell clickable" style="width: ${widths[14]}%" align="right" data-sort-property="profitPerHour" title="Profit Per Hour" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/⏲</div>
-            <div class="cell clickable" style="width: ${widths[15]}%" align="right" data-sort-property="profitPerStaff" title="Profit Per Staff" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/👨‍💼</div>
+            <div class="cell clickable" style="width: ${width(2)}" data-sort-property="toAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">To</div>
+            <div class="cell clickable" style="width: ${width(3)}" data-sort-property="model" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Model</div>
+            <div class="cell clickable" style="width: ${width(4)}" align="right" data-sort-property="distance" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Dist.</div>
+            <div class="cell clickable" style="width: ${width(5)}" align="right" data-sort-property="totalCapacity" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Capacity (Freq.)</div>
+            <div class="cell clickable" style="width: ${width(6)}" align="right" data-sort-property="totalPassengers" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Pax</div>
+            <div class="cell clickable" style="width: ${width(7)}" align="right" data-sort-property="transitPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Transit Pax (Home T + Destination T) and % of all pax">Transit</div>
+            <div class="cell clickable" style="width: ${width(8)}" align="right" data-sort-property="totalLoadFactor" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Load Factor">LF</div>
+            <div class="cell clickable" style="width: ${width(9)}" align="right" data-sort-property="satisfaction" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Satisfaction Factor">SF</div>
+            <div class="cell clickable" style="width: ${width(10)}" align="right" data-sort-property="revenue" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Revenue</div>
+            <div class="cell clickable" style="width: ${width(11)}" align="right" data-sort-property="profit" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">Profit</div>
+            <div class="cell clickable" style="width: ${width(12)}" align="right" data-sort-property="profitMargin" title="Profit Margin" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Gain</div>
+            <div class="cell clickable" style="width: ${width(13)}" align="right" data-sort-property="profitPerPax" title="Profit PerPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/🧍</div>
+            <div class="cell clickable" style="width: ${width(14)}" align="right" data-sort-property="profitPerFlight" title="Profit Per Flight" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/✈</div>
+            <div class="cell clickable" style="width: ${width(15)}" align="right" data-sort-property="profitPerHour" title="Profit Per Hour" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/⏲</div>
+            <div class="cell clickable" style="width: ${width(16)}" align="right" data-sort-property="profitPerStaff" title="Profit Per Staff" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/👨‍💼</div>
         `);
 
         $('#linksTable .table-header').html(`
-            <div class="cell" style="width: ${widths[16]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[0]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[1]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[2]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[3]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[4]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[5]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[6]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[7]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[8]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[9]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[10]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[11]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[12]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[13]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[14]}%; border-bottom: none;"></div>
-            <div class="cell" style="width: ${widths[15]}%; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(0)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(1)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(2)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(3)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(4)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(5)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(6)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(7)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(8)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(9)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(10)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(11)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(12)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(13)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(14)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(15)}; border-bottom: none;"></div>
+            <div class="cell" style="width: ${width(16)}; border-bottom: none;"></div>
         `);
     }
 
@@ -1067,6 +1098,8 @@ function launch(){
         linksTable.children("div.table-row").remove()
 
         loadedLinks = sortPreserveOrder(loadedLinks, sortProperty, sortOrder == "ascending")
+        const columnWidths = _computeAutoLinksTableColumnWidths(loadedLinks);
+        updateCustomLinkTableHeader(columnWidths);
         const linkStyleStats = {};
 
         function getStyleStatsForKey(keyName) {
@@ -1126,6 +1159,12 @@ function launch(){
             colorKeyMaps[keyName].set(link, colorResult);
 
             return colorResult;
+        }
+
+        function applyColumnWidthsToRow(row) {
+            row.children('.cell').each((index, cell) => {
+                $(cell).css('width', `${columnWidths[index].toFixed(2)}%`);
+            });
         }
 
         const rows = [];
@@ -1191,6 +1230,7 @@ function launch(){
                 row.css({'text-shadow': '0 0 3px red'});
             }
 
+            applyColumnWidthsToRow(row);
             rows.push(row)
         });
 
