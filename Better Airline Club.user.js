@@ -122,6 +122,78 @@ function _populateDerivedFieldsOnLink(link, fundingProjection) {
     link.profitPerStaff = link.profit / link.staffInfo.staffBreakdown.total;
 }
 
+function _getDefaultOriginBreakdown() {
+    return {
+        homeAirportPax: 0,
+        destinationAirportPax: 0,
+        homeTransitPax: 0,
+        destinationTransitPax: 0,
+        totalTransitPax: 0,
+    };
+}
+
+function _sumRelatedLinkPassengers(relatedLinks) {
+    if (!Array.isArray(relatedLinks)) {
+        return 0;
+    }
+
+    return relatedLinks.reduce((sum, relatedLink) => {
+        if (relatedLink && Number.isFinite(relatedLink.passenger)) {
+            return sum + relatedLink.passenger;
+        }
+
+        return sum;
+    }, 0);
+}
+
+function _getOriginBreakdownFromPassengerMap(passengerMap, linkId) {
+    if (!passengerMap) {
+        return _getDefaultOriginBreakdown();
+    }
+
+    let departurePax = 0;
+    let arrivalPax = 0;
+    let homeTransitPax = 0;
+    let destinationTransitPax = 0;
+
+    const relatedLinks = Array.isArray(passengerMap.relatedLinks) ? passengerMap.relatedLinks : [];
+    for (let i = 0; i < relatedLinks.length; i++) {
+        const linkGroup = relatedLinks[i];
+        if (!Array.isArray(linkGroup) || linkGroup.length === 0 || linkGroup[0].linkId !== linkId) {
+            continue;
+        }
+
+        departurePax = _sumRelatedLinkPassengers(linkGroup);
+        homeTransitPax = i > 0 ? _sumRelatedLinkPassengers(relatedLinks[i - 1]) : 0;
+        break;
+    }
+
+    const invertedRelatedLinks = Array.isArray(passengerMap.invertedRelatedLinks) ? passengerMap.invertedRelatedLinks : [];
+    for (let i = 0; i < invertedRelatedLinks.length; i++) {
+        const linkGroup = invertedRelatedLinks[i];
+        if (!Array.isArray(linkGroup) || linkGroup.length === 0 || linkGroup[0].linkId !== linkId) {
+            continue;
+        }
+
+        arrivalPax = _sumRelatedLinkPassengers(linkGroup);
+        destinationTransitPax = i > 0 ? _sumRelatedLinkPassengers(invertedRelatedLinks[i - 1]) : 0;
+        break;
+    }
+
+    return {
+        homeAirportPax: departurePax - homeTransitPax,
+        destinationAirportPax: arrivalPax - destinationTransitPax,
+        homeTransitPax: homeTransitPax,
+        destinationTransitPax: destinationTransitPax,
+        totalTransitPax: homeTransitPax + destinationTransitPax,
+    };
+}
+
+async function _loadOriginBreakdownForLink(airlineId, linkId) {
+    const passengerMap = await _request(`airlines/${airlineId}/related-link-consumption/${linkId}?cycleDelta=0&economy=true&business=true&first=true`);
+    return _getOriginBreakdownFromPassengerMap(passengerMap, linkId);
+}
+
 
 function getAirportText(city, airportCode) {
     if (city) {
@@ -496,13 +568,11 @@ async function loadLinkSurvey(airlineId, link) {
     $("#paxType").text(``);
     $("#newLoyalists").text(``);
     const survey = await _request(`airlines/${airlineId}/link-composition/${link.id}`);
-    const passengerMap = await _request(`airlines/${airlineId}/related-link-consumption/${link.id}?cycleDelta=0&economy=true&business=true&first=true`);
-    var homeAirportPax = 0;
-    var destinationAirportPax = 0;
-    var homeTransitPax = 0;
-    var destinationTransitPax = 0;
-    var departurePax = 0;
-    var arrivalPax = 0;
+    const originBreakdown = await _loadOriginBreakdownForLink(airlineId, link.id);
+    var homeAirportPax = originBreakdown.homeAirportPax;
+    var destinationAirportPax = originBreakdown.destinationAirportPax;
+    var homeTransitPax = originBreakdown.homeTransitPax;
+    var destinationTransitPax = originBreakdown.destinationTransitPax;
     var cheapPax = 0;
     var swiftPax = 0;
     var loyalistPax = 0;
@@ -514,36 +584,6 @@ async function loadLinkSurvey(airlineId, link) {
     var cheapNewLoyalists = 0;
     var swiftNewLoyalists = 0;
     var loyalNewLoyalists = 0;
-    for (i = 0; i < passengerMap.relatedLinks.length; i++) {
-        if (passengerMap.relatedLinks[i][0].linkId === link.id) {
-            for (var k = 0; k < passengerMap.relatedLinks[i].length; k++) {
-                departurePax += passengerMap.relatedLinks[i][k].passenger
-            }
-            try {
-                for (var j = 0; j < passengerMap.relatedLinks[i-1].length; j++) {
-                    homeTransitPax += passengerMap.relatedLinks[i-1][j].passenger
-                }
-            } catch (TypeError) {
-                    homeTransitPax = 0
-            }
-        }
-    }
-    for (i = 0; i < passengerMap.invertedRelatedLinks.length; i++) {
-        if (passengerMap.invertedRelatedLinks[i][0].linkId === link.id) {
-            for (var k = 0; k < passengerMap.invertedRelatedLinks[i].length; k++) {
-                arrivalPax += passengerMap.invertedRelatedLinks[i][k].passenger
-            }
-            try {
-                for (j = 0; j < passengerMap.invertedRelatedLinks[i-1].length; j++) {
-                    destinationTransitPax += passengerMap.invertedRelatedLinks[i-1][j].passenger
-                }
-            } catch (TypeError) {
-                destinationTransitPax = 0
-            }
-        }
-    }
-    homeAirportPax = departurePax - homeTransitPax
-    destinationAirportPax = arrivalPax - destinationTransitPax
     for (i = 0; i < survey.preferenceType.length; i++) {
         if (survey.preferenceType[i].title === "Budget") {
             budgetPax += survey.preferenceType[i].passengerCount;
@@ -914,7 +954,7 @@ function launch(){
     }
 
     unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader() {
-        if ($('#linksTableSortHeader').children().length === 16) {
+        if ($('#linksTableSortHeader').children().length === 18) {
             return;
         }
 
@@ -928,20 +968,21 @@ function launch(){
         const widths = [
             8,
             8,
-            8,
+            7,
             6,
-            11,
+            9,
+            4,
             4,
             5,
             5,
-            8,
+            7,
             7,
             5,
             5,
             6,
             6,
             6,
-            2, //tiers, 1st
+            2, // tiers rank, first
         ];
 
         const sum = widths.reduce((acc, val) => acc + val, 0);
@@ -950,7 +991,7 @@ function launch(){
         }
 
         $('#linksTableSortHeader').html(`
-            <div class="cell clickable" style="width: ${widths[15]}%" data-sort-property="tiersRank" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))" title="Aggregated Rank">#</div>
+            <div class="cell clickable" style="width: ${widths[16]}%" data-sort-property="tiersRank" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))" title="Aggregated Rank">#</div>
             <div class="cell clickable" style="width: ${widths[0]}%" data-sort-property="fromAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">From</div>
             <div class="cell clickable" style="width: 0%" data-sort-property="lastUpdate" data-sort-order="ascending" id="hiddenLinkSortBy"></div> <!--hidden column for last update (cannot be first otherwise the left round corner would not work -->
             <div class="cell clickable" style="width: ${widths[1]}%" data-sort-property="toAirportCode" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">To</div>
@@ -958,19 +999,20 @@ function launch(){
             <div class="cell clickable" style="width: ${widths[3]}%" align="right" data-sort-property="distance" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Dist.</div>
             <div class="cell clickable" style="width: ${widths[4]}%" align="right" data-sort-property="totalCapacity" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Capacity (Freq.)</div>
             <div class="cell clickable" style="width: ${widths[5]}%" align="right" data-sort-property="totalPassengers" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Pax</div>
-            <div class="cell clickable" style="width: ${widths[6]}%" align="right" data-sort-property="totalLoadFactor" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Load Factor">LF</div>
-            <div class="cell clickable" style="width: ${widths[7]}%" align="right" data-sort-property="satisfaction" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Satisfaction Factor">SF</div>
-            <div class="cell clickable" style="width: ${widths[8]}%" align="right" data-sort-property="revenue" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Revenue</div>
-            <div class="cell clickable" style="width: ${widths[9]}%" align="right" data-sort-property="profit" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">Profit</div>
-            <div class="cell clickable" style="width: ${widths[10]}%" align="right" data-sort-property="profitMargin" title="Profit Margin" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Gain</div>
-            <div class="cell clickable" style="width: ${widths[11]}%" align="right" data-sort-property="profitPerPax" title="Profit PerPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/🧍</div>
-            <div class="cell clickable" style="width: ${widths[12]}%" align="right" data-sort-property="profitPerFlight" title="Profit Per Flight" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/✈</div>
-            <div class="cell clickable" style="width: ${widths[13]}%" align="right" data-sort-property="profitPerHour" title="Profit Per Hour" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/⏲</div>
-            <div class="cell clickable" style="width: ${widths[14]}%" align="right" data-sort-property="profitPerStaff" title="Profit Per Staff" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/👨‍💼</div>
+            <div class="cell clickable" style="width: ${widths[6]}%" align="right" data-sort-property="transitPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Transit Pax (Home T + Destination T) and % of all pax">Transit</div>
+            <div class="cell clickable" style="width: ${widths[7]}%" align="right" data-sort-property="totalLoadFactor" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Load Factor">LF</div>
+            <div class="cell clickable" style="width: ${widths[8]}%" align="right" data-sort-property="satisfaction" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Satisfaction Factor">SF</div>
+            <div class="cell clickable" style="width: ${widths[9]}%" align="right" data-sort-property="revenue" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Revenue</div>
+            <div class="cell clickable" style="width: ${widths[10]}%" align="right" data-sort-property="profit" data-sort-order="descending" onclick="toggleLinksTableSortOrder($(this))">Profit</div>
+            <div class="cell clickable" style="width: ${widths[11]}%" align="right" data-sort-property="profitMargin" title="Profit Margin" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Gain</div>
+            <div class="cell clickable" style="width: ${widths[12]}%" align="right" data-sort-property="profitPerPax" title="Profit PerPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/🧍</div>
+            <div class="cell clickable" style="width: ${widths[13]}%" align="right" data-sort-property="profitPerFlight" title="Profit Per Flight" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/✈</div>
+            <div class="cell clickable" style="width: ${widths[14]}%" align="right" data-sort-property="profitPerHour" title="Profit Per Hour" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/⏲</div>
+            <div class="cell clickable" style="width: ${widths[15]}%" align="right" data-sort-property="profitPerStaff" title="Profit Per Staff" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">$/👨‍💼</div>
         `);
 
         $('#linksTable .table-header').html(`
-            <div class="cell" style="width: ${widths[15]}%; border-bottom: none;"></div>
+            <div class="cell" style="width: ${widths[16]}%; border-bottom: none;"></div>
             <div class="cell" style="width: ${widths[0]}%; border-bottom: none;"></div>
             <div class="cell" style="width: ${widths[1]}%; border-bottom: none;"></div>
             <div class="cell" style="width: ${widths[2]}%; border-bottom: none;"></div>
@@ -986,6 +1028,7 @@ function launch(){
             <div class="cell" style="width: ${widths[12]}%; border-bottom: none;"></div>
             <div class="cell" style="width: ${widths[13]}%; border-bottom: none;"></div>
             <div class="cell" style="width: ${widths[14]}%; border-bottom: none;"></div>
+            <div class="cell" style="width: ${widths[15]}%; border-bottom: none;"></div>
         `);
     }
 
@@ -994,7 +1037,18 @@ function launch(){
         const links = await _request(`airlines/${activeAirline.id}/links-details`);
 
         await Promise.all(links.map(async link => {
-            link.staffInfo = await _getOvertimeAndStaffInfoForLink(link);
+            const [staffInfo, originBreakdown] = await Promise.all([
+                _getOvertimeAndStaffInfoForLink(link),
+                _loadOriginBreakdownForLink(activeAirline.id, link.id).catch(error => {
+                    console.error(`Unable to load origin breakdown for link ${link.id}`, error);
+                    return _getDefaultOriginBreakdown();
+                }),
+            ]);
+
+            link.staffInfo = staffInfo;
+            link.homeTransitPax = originBreakdown.homeTransitPax;
+            link.destinationTransitPax = originBreakdown.destinationTransitPax;
+            link.transitPax = originBreakdown.totalTransitPax;
         }))
 
         _updateChartOptionsIfNeeded();
@@ -1089,6 +1143,13 @@ function launch(){
             row.append("<div class='cell' align='right'>" + link.distance + "km</div>")
             row.append("<div class='cell' align='right'>" + link.totalCapacity + " (" + link.frequency + ")</div>")
             row.append("<div class='cell' align='right'>" + link.totalPassengers + "</div>")
+            const transitPax = Number.isFinite(link.transitPax) ? link.transitPax : 0;
+            const transitPaxPercent = link.totalPassengers > 0 ? ((transitPax / link.totalPassengers) * 100) : 0;
+            const homeTransitPax = Number.isFinite(link.homeTransitPax) ? link.homeTransitPax : 0;
+            const destinationTransitPax = Number.isFinite(link.destinationTransitPax) ? link.destinationTransitPax : 0;
+            const transitPaxText = `${commaSeparateNumber(transitPax)} (${transitPaxPercent.toFixed(1)}%)`;
+            const transitPaxTitle = `Transit pax ${commaSeparateNumber(transitPax)} (${transitPaxPercent.toFixed(1)}% of all pax) | H-T: ${commaSeparateNumber(homeTransitPax)} | D-T: ${commaSeparateNumber(destinationTransitPax)}`;
+            row.append("<div class='cell' align='right' title='" + transitPaxTitle + "'>" + transitPaxText + "</div>")
 
             const lfBreakdown = {
                 economy: link.passengers.economy / link.capacity.economy,
