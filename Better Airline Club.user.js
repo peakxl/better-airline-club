@@ -1008,10 +1008,13 @@ function launch(){
         $("#setFavoriteModal").data("model", model)
     }
 
-    unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader(widths) {
+    unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader(widths, selectedSortProperty, selectedSortOrder) {
         const columnWidths = (Array.isArray(widths) && widths.length === 17)
             ? widths
             : _getDefaultLinksTableColumnWidths();
+        const previousSelectedHeader = $('#linksTableSortHeader .cell.selected').first();
+        const sortProperty = selectedSortProperty || previousSelectedHeader.data('sort-property') || 'profit';
+        const sortOrder = selectedSortOrder || previousSelectedHeader.data('sort-order') || 'descending';
 
         $('#linksCanvas .mainPanel').css({width: MAIN_PANEL_WIDTH});
         $('#linksCanvas .sidePanel').css({width: SIDE_PANEL_WIDTH});
@@ -1061,6 +1064,15 @@ function launch(){
             <div class="cell" style="width: ${width(15)}; border-bottom: none;"></div>
             <div class="cell" style="width: ${width(16)}; border-bottom: none;"></div>
         `);
+
+        const selectedHeader = $('#linksTableSortHeader .cell').filter(function() {
+            return $(this).data('sort-property') === sortProperty;
+        }).first();
+        if (selectedHeader.length) {
+            selectedHeader.addClass('selected');
+            selectedHeader.data('sort-order', sortOrder);
+            selectedHeader.attr('data-sort-order', sortOrder);
+        }
     }
 
     unsafeWindow.loadLinksTable = async function loadLinksTable() {
@@ -1083,13 +1095,15 @@ function launch(){
         }))
 
         _updateChartOptionsIfNeeded();
-        updateCustomLinkTableHeader();
         updateLoadedLinks(links);
 
         $.each(links, (key, link) => _populateDerivedFieldsOnLink(link, fundingProjection));
 
-        var selectedSortHeader = $('#linksTableSortHeader .cell.selected')
-        updateLinksTable(selectedSortHeader.data('sort-property'), selectedSortHeader.data('sort-order'))
+        var selectedSortHeader = $('#linksTableSortHeader .cell.selected');
+        updateLinksTable(
+            selectedSortHeader.data('sort-property') || 'profit',
+            selectedSortHeader.data('sort-order') || 'descending'
+        )
     }
 
     var colorKeyMaps = {};
@@ -1097,9 +1111,16 @@ function launch(){
         var linksTable = $("#linksCanvas #linksTable")
         linksTable.children("div.table-row").remove()
 
+        if (!sortProperty) {
+            sortProperty = $('#linksTableSortHeader .cell.selected').first().data('sort-property') || 'profit';
+        }
+        if (!sortOrder) {
+            sortOrder = $('#linksTableSortHeader .cell.selected').first().data('sort-order') || 'descending';
+        }
+
         loadedLinks = sortPreserveOrder(loadedLinks, sortProperty, sortOrder == "ascending")
         const columnWidths = _computeAutoLinksTableColumnWidths(loadedLinks);
-        updateCustomLinkTableHeader(columnWidths);
+        updateCustomLinkTableHeader(columnWidths, sortProperty, sortOrder);
         const linkStyleStats = {};
 
         function getStyleStatsForKey(keyName) {
