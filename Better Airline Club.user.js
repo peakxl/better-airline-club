@@ -196,57 +196,8 @@ async function _loadOriginBreakdownForLink(airlineId, linkId) {
 
 function _getDefaultLinksTableColumnWidths() {
     // [tiers, from, to, model, dist, capacity, pax, transit, lf, sf, revenue, profit, gain, $/pax, $/flight, $/hour, $/staff]
-    return [2, 8, 8, 7, 6, 9, 4, 5, 5, 7, 7, 5, 5, 6, 6, 6, 4];
-}
-
-function _computeAutoLinksTableColumnWidths(links) {
-    const baseWeights = _getDefaultLinksTableColumnWidths();
-    if (!Array.isArray(links) || links.length === 0) {
-        return baseWeights;
-    }
-
-    const baselineLengths = [2, 3, 3, 8, 6, 10, 6, 12, 6, 6, 8, 8, 6, 8, 8, 8, 8];
-    const maxExtraWeights = [0, 3, 3, 3, 2, 3, 2, 3, 2, 2, 3, 3, 2, 2, 2, 2, 2];
-    const maxLengths = baselineLengths.slice();
-    const sampleCount = Math.min(links.length, 120);
-
-    for (let i = 0; i < sampleCount; i++) {
-        const link = links[i];
-        const transitPax = Number.isFinite(link.transitPax) ? link.transitPax : 0;
-        const transitPaxPercent = link.totalPassengers > 0 ? ((transitPax / link.totalPassengers) * 100) : 0;
-
-        const values = [
-            `${Number.isFinite(link.tiersRank) ? link.tiersRank : 99}`,
-            `${link.fromAirportCode || ''}`,
-            `${link.toAirportCode || ''}`,
-            `${getShortModelName(link.model || '')}`,
-            `${link.distance || 0}km`,
-            `${link.totalCapacity || 0} (${link.frequency || 0})`,
-            `${link.totalPassengers || 0}`,
-            `${transitPax} (${transitPaxPercent.toFixed(1)}%)`,
-            `${link.totalLoadFactor || 0}%`,
-            `${Math.round(Math.max((link.satisfaction || 0) - 0.6, 0) * 250)}%`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.revenue) ? link.revenue : 0)}`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.profit) ? link.profit : 0)}`,
-            `${Math.round(Number.isFinite(link.profitMargin) ? link.profitMargin : 0)}%`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerPax) ? link.profitPerPax : 0)}`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerFlight) ? link.profitPerFlight : 0)}`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerHour) ? link.profitPerHour : 0)}`,
-            `$${commaSeparateNumberForLinks(Number.isFinite(link.profitPerStaff) ? link.profitPerStaff : 0)}`,
-        ];
-
-        for (let col = 0; col < values.length; col++) {
-            maxLengths[col] = Math.max(maxLengths[col], values[col].length);
-        }
-    }
-
-    const dynamicWeights = baseWeights.map((baseWeight, index) => {
-        const extraByLength = Math.max(0, maxLengths[index] - baselineLengths[index]) / 4;
-        return baseWeight + Math.min(maxExtraWeights[index], extraByLength);
-    });
-
-    const totalWeight = dynamicWeights.reduce((sum, weight) => sum + weight, 0);
-    return dynamicWeights.map(weight => (weight / totalWeight) * 100);
+    // Explicitly kept symmetric for readability: From/To are equal, LF/SF are equal.
+    return [2, 8, 8, 7, 6, 10, 5, 6, 5, 5, 8, 7, 5, 5, 4, 4, 5];
 }
 
 
@@ -1009,6 +960,10 @@ function launch(){
     }
 
     unsafeWindow.updateCustomLinkTableHeader = function updateCustomLinkTableHeader(widths, selectedSortProperty, selectedSortOrder) {
+        if ($('#linksTableSortHeader').children().length === 18) {
+            return;
+        }
+
         const columnWidths = (Array.isArray(widths) && widths.length === 17)
             ? widths
             : _getDefaultLinksTableColumnWidths();
@@ -1033,7 +988,7 @@ function launch(){
             <div class="cell clickable" style="width: ${width(4)}" align="right" data-sort-property="distance" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Dist.</div>
             <div class="cell clickable" style="width: ${width(5)}" align="right" data-sort-property="totalCapacity" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Capacity (Freq.)</div>
             <div class="cell clickable" style="width: ${width(6)}" align="right" data-sort-property="totalPassengers" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Pax</div>
-            <div class="cell clickable" style="width: ${width(7)}" align="right" data-sort-property="transitPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Transit Pax (Home T + Destination T) and % of all pax">Transit</div>
+            <div class="cell clickable" style="width: ${width(7)}" align="right" data-sort-property="transitPax" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Transit Pax (Home T + Destination T) and % of all pax">Transit Pax</div>
             <div class="cell clickable" style="width: ${width(8)}" align="right" data-sort-property="totalLoadFactor" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Load Factor">LF</div>
             <div class="cell clickable" style="width: ${width(9)}" align="right" data-sort-property="satisfaction" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))" title="Satisfaction Factor">SF</div>
             <div class="cell clickable" style="width: ${width(10)}" align="right" data-sort-property="revenue" data-sort-order="ascending" onclick="toggleLinksTableSortOrder($(this))">Revenue</div>
@@ -1095,6 +1050,7 @@ function launch(){
         }))
 
         _updateChartOptionsIfNeeded();
+        updateCustomLinkTableHeader();
         updateLoadedLinks(links);
 
         $.each(links, (key, link) => _populateDerivedFieldsOnLink(link, fundingProjection));
@@ -1119,8 +1075,7 @@ function launch(){
         }
 
         loadedLinks = sortPreserveOrder(loadedLinks, sortProperty, sortOrder == "ascending")
-        const columnWidths = _computeAutoLinksTableColumnWidths(loadedLinks);
-        updateCustomLinkTableHeader(columnWidths, sortProperty, sortOrder);
+        const columnWidths = _getDefaultLinksTableColumnWidths();
         const linkStyleStats = {};
 
         function getStyleStatsForKey(keyName) {
